@@ -12,52 +12,53 @@ from pathlib import Path
 import numpy as np
 from datasets import load_dataset
 from PIL import Image
-from sklearn.metrics import (
-    accuracy_score,
-    precision_recall_fscore_support,
-    roc_auc_score,
-)
-from transformers import (
-    AutoImageProcessor,
-    AutoModelForImageClassification,
-    EarlyStoppingCallback,
-    PrinterCallback,
-    Trainer,
-    TrainingArguments,
-)
+from sklearn.metrics import (accuracy_score, precision_recall_fscore_support,
+                             roc_auc_score)
+from torchvision import transforms
+from transformers import (AutoImageProcessor, AutoModelForImageClassification,
+                          EarlyStoppingCallback, PrinterCallback, Trainer,
+                          TrainingArguments)
 
-# Define the model architecture and image processor
-# MODEL_ID = "microsoft/swin-base-patch4-window7-224-in22k"
 # MODEL_ID = "google/vit-base-patch16-224"
-MODEL_ID = "facebook/deit-base-distilled-patch16-224"
-# MODEL_ID = "facebook/convnext-base-224-22k"
-IMAGE_PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_ID)
+MODEL_ID = "facebook/convnext-base-224-22k"
+# MODEL_ID = "facebook/deit-base-patch16-224"
+# MODEL_ID = "facebook/deit-base-distilled-patch16-224"
+# MODEL_ID = "microsoft/swin-base-patch4-window7-224-in22k"
 
+IMAGE_PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_ID)
 ZOOM = 400
 
 # Define file paths
 CWD = Path().absolute()
 INPUT_PATH = CWD / f"breakhis_{ZOOM}x"
 
+_transforms = transforms.Compose(
+    [
+        transforms.RandomResizedCrop(size=224),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(degrees=15),
+        transforms.RandomVerticalFlip(),
+        transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
+        transforms.RandomErasing(p=0.2, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
+    ]
+)
+
+to_tensor = transforms.ToTensor()
+to_image = transforms.ToPILImage()
+
 
 def process_example(image):
     """Preprocesses an image for the model"""
-    inputs = IMAGE_PROCESSOR(image, return_tensors="pt")
-    return inputs["pixel_values"]
+    inputs = IMAGE_PROCESSOR(
+        to_image(_transforms(to_tensor(image))), return_tensors="pt"
+    )
+    return inputs["pixel_values"].squeeze(0)
 
 
 def process_dataset(example):
     """Preprocesses a dataset for the model"""
-    example["pixel_values"] = process_example(
-        Image.open(example["file_loc"]).convert("RGB")
-    )
-    example["pixel_values"] = np.squeeze(example["pixel_values"], axis=0)
-    return example
-
-
-def remove_extra_dim(example):
-    """Removes the extra dimension from the dataset"""
-    example["pixel_values"] = np.squeeze(example["pixel_values"], axis=0)
+    image = Image.open(example["file_loc"]).convert("RGB")
+    example["pixel_values"] = process_example(image)
     return example
 
 
@@ -66,11 +67,8 @@ def load_data(fold_index):
     train_csv = str(INPUT_PATH / f"train_{fold_index}.csv")
     val_csv = str(INPUT_PATH / f"val_{fold_index}.csv")
     dataset = load_dataset("csv", data_files={"train": train_csv, "val": val_csv})
-
     dataset = dataset.map(process_dataset, with_indices=False, num_proc=4)
-
     print(f"Loaded {fold_index} dataset: {dataset}")
-
     return dataset
 
 
@@ -103,7 +101,7 @@ def compute_metrics(eval_pred):
 def train_model(
     fold_idx, train_dataset, val_dataset, learning_rate, weight_decay_rate, output_path
 ):  # pylint: disable=R0913
-    """ " Trains the model"""
+    """Trains the model"""
     model = AutoModelForImageClassification.from_pretrained(
         MODEL_ID,
         num_labels=len(id2label),
@@ -112,6 +110,10 @@ def train_model(
         ignore_mismatched_sizes=True,
     )
 
+    print(f"MODEL INFO: {model}")
+    print(
+        f"PARAMS NUM (M): {sum(param.nelement() for param in model.parameters()) / 1e6}"
+    )
     training_args = TrainingArguments(
         output_dir=str(output_path / f"model_{fold_idx}"),
         per_device_train_batch_size=BATCH_SIZE,
@@ -151,7 +153,6 @@ def train_model(
     trainer.log_metrics("train", train_result.metrics)
     trainer.save_metrics("train", train_result.metrics)
     trainer.save_state()
-
 
     eval_metrics = trainer.evaluate()
     trainer.save_metrics("eval", eval_metrics)
