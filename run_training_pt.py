@@ -123,15 +123,16 @@ def train_model(
         weight_decay=weight_decay_rate,
         push_to_hub=False,
         remove_unused_columns=False,
-        logging_strategy="epoch",
-        evaluation_strategy="epoch",
-        save_strategy="epoch",
+        logging_strategy="steps",
+        evaluation_strategy="steps",
+        save_strategy="steps",
         use_cpu=False,
         fp16=True,
         torch_compile=True,
         do_train=True,
         load_best_model_at_end=True,  # Load the best model at the end of training
         metric_for_best_model="eval_loss",  # Choose the metric to monitor for early stopping
+        greater_is_better = False,  # Early stop when the metric is decreasing
     )
 
     trainer = Trainer(
@@ -204,7 +205,7 @@ def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate):
 
 def main():
     """Main function"""
-    experiment_id = "DeiT_PT"
+    experiment_id = "ViT_PT_patches224"
     fold_idx = 0
     learning_rate = 3e-5
     weight_decay_rate = 5e-3
