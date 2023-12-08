@@ -19,8 +19,17 @@ from transformers import (AutoImageProcessor, AutoModelForImageClassification,
                           EarlyStoppingCallback, PrinterCallback, Trainer,
                           TrainingArguments)
 
-# MODEL_ID = "google/vit-base-patch16-224"
-MODEL_ID = "facebook/convnext-base-224-22k"
+from transformers.integrations import TensorBoardCallback
+
+import torch
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+from torch.utils.tensorboard import SummaryWriter
+
+
+MODEL_ID = "google/vit-base-patch16-224"
+# MODEL_ID = "facebook/convnext-base-224-22k"
 # MODEL_ID = "facebook/deit-base-patch16-224"
 # MODEL_ID = "facebook/deit-base-distilled-patch16-224"
 # MODEL_ID = "microsoft/swin-base-patch4-window7-224-in22k"
@@ -67,13 +76,13 @@ def load_data(fold_index):
     train_csv = str(INPUT_PATH / f"train_{fold_index}.csv")
     val_csv = str(INPUT_PATH / f"val_{fold_index}.csv")
     dataset = load_dataset("csv", data_files={"train": train_csv, "val": val_csv})
-    dataset = dataset.map(process_dataset, with_indices=False, num_proc=4)
+    dataset = dataset.map(process_dataset, with_indices=False, num_proc=12)
     print(f"Loaded {fold_index} dataset: {dataset}")
     return dataset
 
 
 EPOCHS = 50
-BATCH_SIZE = 16
+BATCH_SIZE = 128
 
 id2label = {0: "benign", 1: "malignant"}
 label2id = {v: k for k, v in id2label.items()}
@@ -118,7 +127,11 @@ def train_model(
         output_dir=str(output_path / f"model_{fold_idx}"),
         per_device_train_batch_size=BATCH_SIZE,
         per_device_eval_batch_size=BATCH_SIZE,
+        # gradient_accumulation_steps=4, # slows down, saves memory
+        # gradient_checkpointing=True, # slows down, saves memory
+        dataloader_num_workers=8, # can this even help with current form of data loading?
         num_train_epochs=EPOCHS,
+        optim="adamw_bnb_8bit",
         learning_rate=learning_rate,
         weight_decay=weight_decay_rate,
         push_to_hub=False,
@@ -126,13 +139,17 @@ def train_model(
         logging_strategy="steps",
         evaluation_strategy="steps",
         save_strategy="steps",
-        use_cpu=False,
-        fp16=True,
+        logging_steps=100,
+        save_steps=100,
+        # fp16=True,
+        bf16=True, # available only with +Ampere architecture (>=RTX 3000)
+        tf32=True,
         torch_compile=True,
         do_train=True,
         load_best_model_at_end=True,  # Load the best model at the end of training
         metric_for_best_model="eval_loss",  # Choose the metric to monitor for early stopping
         greater_is_better = False,  # Early stop when the metric is decreasing
+        report_to=["tensorboard"]
     )
 
     trainer = Trainer(
@@ -146,6 +163,7 @@ def train_model(
                 early_stopping_patience=5, early_stopping_threshold=0.0
             ),
             PrinterCallback(),
+            TensorBoardCallback(SummaryWriter()),
         ],
     )
 
@@ -205,7 +223,7 @@ def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate):
 
 def main():
     """Main function"""
-    experiment_id = "ViT_PT_patches224"
+    experiment_id = "ViT_PT_patches224_testperformance3"
     fold_idx = 0
     learning_rate = 3e-5
     weight_decay_rate = 5e-3
