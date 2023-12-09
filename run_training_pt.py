@@ -3,36 +3,39 @@ Fine-tune a pretrained model on a BreakHis dataset using
 PyTorch via HuggingFace's Transformers library.
 """
 
-from datetime import datetime
 import json
 import multiprocessing
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-from datasets import load_dataset
-from PIL import Image
-from sklearn.metrics import (accuracy_score, precision_recall_fscore_support,
-                             roc_auc_score)
-from torchvision import transforms
-from transformers import (AutoImageProcessor, AutoModelForImageClassification,
-                          EarlyStoppingCallback, PrinterCallback, Trainer,
-                          TrainingArguments)
-
-from transformers.integrations import TensorBoardCallback
-import torch
-from torch.utils.tensorboard import SummaryWriter
-
 import psutil
-from datasets import config
+import torch
+from datasets import config, load_dataset
+from PIL import Image
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from torch.utils.tensorboard import SummaryWriter
+from torchvision import transforms
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,
+    EarlyStoppingCallback,
+    PrinterCallback,
+    Trainer,
+    TrainingArguments,
+)
+from transformers.integrations import TensorBoardCallback
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 # Set IN_MEMORY_MAX_SIZE to available RAM
 config.IN_MEMORY_MAX_SIZE = int(psutil.virtual_memory().available * 0.9)
-print(f"{config.IN_MEMORY_MAX_SIZE / (1024**3):.2f} GB of data will be stored in the RAM")
+print(
+    f"{config.IN_MEMORY_MAX_SIZE / (1024**3):.2f} GB of data will be stored in the RAM"
+)
 
 CPU_THREADS = psutil.cpu_count(logical=True)
 print(f"Number of available CPU threads: {CPU_THREADS}")
@@ -80,16 +83,20 @@ def process_dataset(example):
     example["pixel_values"] = process_example(image)
     return example
 
+
 def print_first_patient_ids(dataset, n=10):
     """Prints the 'patient_id' for the first n rows of a Hugging Face dataset."""
     for i in range(n):
-        print(dataset[i]['patient_id'])
+        print(dataset[i]["patient_id"])
+
 
 def load_data(fold_index):
     """Loads the dataset"""
     train_csv = str(INPUT_PATH / f"train_{fold_index}.csv")
     val_csv = str(INPUT_PATH / f"val_{fold_index}.csv")
-    dataset = load_dataset("csv", data_files={"train": train_csv, "val": val_csv}, keep_in_memory=True)
+    dataset = load_dataset(
+        "csv", data_files={"train": train_csv, "val": val_csv}, keep_in_memory=True
+    )
     dataset = dataset.map(process_dataset, with_indices=False, num_proc=CPU_THREADS)
     dataset["train"] = dataset["train"].shuffle(seed=42)
     dataset["val"] = dataset["val"].shuffle(seed=42)
@@ -151,7 +158,7 @@ def train_model(
         per_device_eval_batch_size=BATCH_SIZE,
         # gradient_accumulation_steps=4, # slows down, saves memory
         # gradient_checkpointing=True, # slows down, saves memory
-        dataloader_num_workers=CPU_THREADS, # can this even help with current form of data loading?
+        dataloader_num_workers=CPU_THREADS,  # can this even help with current form of data loading?
         num_train_epochs=EPOCHS,
         optim="adamw_bnb_8bit",
         learning_rate=learning_rate,
@@ -164,14 +171,14 @@ def train_model(
         logging_steps=250,
         save_steps=250,
         # fp16=True,
-        bf16=True, # available only with +Ampere architecture (>=RTX 3000)
+        bf16=True,  # available only with +Ampere architecture (>=RTX 3000)
         tf32=True,
         torch_compile=True,
         do_train=True,
         load_best_model_at_end=True,  # Load the best model at the end of training
         metric_for_best_model="eval_loss",  # Choose the metric to monitor for early stopping
-        greater_is_better = False,  # Early stop when the metric is decreasing
-        report_to=["tensorboard"]
+        greater_is_better=False,  # Early stop when the metric is decreasing
+        report_to=["tensorboard"],
     )
 
     trainer = Trainer(
@@ -247,7 +254,7 @@ def main():
     """Main function"""
     # experiment_id = "ViT_PT_patches224_grid"
     experiment_id = "ConvNext_PT_patches224_grid"
-    
+
     # learning_rate_values = [1e-5, 3e-5, 1e-4, 3e-4]
     # weight_decay_values = [1e-3, 5e-3, 1e-2]
     learning_rate_values = [3e-5]
@@ -255,10 +262,14 @@ def main():
 
     for learning_rate in learning_rate_values:
         for weight_decay_rate in weight_decay_values:
-            formatted_lr = f"{learning_rate:.0e}".replace('.', 'p')
-            formatted_wdr = f"{weight_decay_rate:.0e}".replace('.', 'p')
-            formatted_current_time = datetime.now().strftime("%Y_%m_%d_%H_%M")
-            output_path = CWD / "results" / f"{ZOOM}x_{experiment_id}_lr_{formatted_lr}_wdr_{formatted_wdr}_{formatted_current_time}"
+            lr_f = f"{learning_rate:.0e}".replace(".", "p")
+            wdr_f = f"{weight_decay_rate:.0e}".replace(".", "p")
+            cur_dt_f = datetime.now().strftime("%Y_%m_%d_%H_%M")
+            output_path = (
+                CWD
+                / "results"
+                / f"{ZOOM}x_{experiment_id}_lr_{lr_f}_wdr_{wdr_f}_{cur_dt_f}"
+            )
 
             os.makedirs(output_path, exist_ok=True)
             print(f"Directory {output_path} created.")
@@ -266,7 +277,9 @@ def main():
             only_one_fold = False
             if only_one_fold:
                 fold_idx = 0
-                print(f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:")
+                print(
+                    f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:"
+                )
                 print(f"Learning rate: {learning_rate}")
                 print(f"Weight decay rate: {weight_decay_rate}")
                 run_fold(fold_idx, learning_rate, weight_decay_rate, output_path)
