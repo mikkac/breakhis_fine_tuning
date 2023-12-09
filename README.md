@@ -12,7 +12,7 @@ Before beginning the setup, ensure you have Conda installed on your system. If C
 
 ### Dataset
 
-BreakHis dataset can be downloaded from [kaggle](https://www.kaggle.com/datasets/ambarish/breakhis).
+The BreakHis dataset can be downloaded from [Kaggle](https://www.kaggle.com/datasets/ambarish/breakhis).
 
 ### Setting up the Environment
 
@@ -34,28 +34,20 @@ BreakHis dataset can be downloaded from [kaggle](https://www.kaggle.com/datasets
    conda activate breakhis_env
    ```
 
-3. **Install Poetry**
+3. **Install Dependencies**
 
-   Install Poetry, a tool for dependency management and packaging in Python:
-
-   ```bash
-   pip install poetry
-   ```
-
-4. **Install Dependencies with Poetry**
-
-   Install the required dependencies using Poetry:
+   Install the required dependencies using `pip`:
 
    ```bash
-   poetry install
+   pip install -r requirements.txt
    ```
 
-   This command will read the `pyproject.toml` file and install all necessary dependencies.
+   Ensure that you have a `requirements.txt` file in the root of the project directory containing all the necessary packages.
 
-5. **Verify Installation**
+4. **Verify Installation**
 
    Verify the installation by checking the installed packages:
 
    ```bash
-   poetry show
+   pip list
    ```
