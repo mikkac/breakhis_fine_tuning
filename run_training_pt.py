@@ -20,16 +20,21 @@ from transformers import (AutoImageProcessor, AutoModelForImageClassification,
                           TrainingArguments)
 
 from transformers.integrations import TensorBoardCallback
-
 import torch
+from torch.utils.tensorboard import SummaryWriter
+
+import psutil
+from datasets import config
+
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
-from torch.utils.tensorboard import SummaryWriter
+# Set IN_MEMORY_MAX_SIZE to available RAM
+config.IN_MEMORY_MAX_SIZE = int(psutil.virtual_memory().available * 0.75)
 
 
-MODEL_ID = "google/vit-base-patch16-224"
-# MODEL_ID = "facebook/convnext-base-224-22k"
+# MODEL_ID = "google/vit-base-patch16-224"
+MODEL_ID = "facebook/convnext-base-224-22k"
 # MODEL_ID = "facebook/deit-base-patch16-224"
 # MODEL_ID = "facebook/deit-base-distilled-patch16-224"
 # MODEL_ID = "microsoft/swin-base-patch4-window7-224-in22k"
@@ -43,12 +48,12 @@ INPUT_PATH = CWD / f"breakhis_{ZOOM}x"
 
 _transforms = transforms.Compose(
     [
-        transforms.RandomResizedCrop(size=224),
+        # transforms.RandomResizedCrop(size=224),
         transforms.RandomHorizontalFlip(),
         transforms.RandomRotation(degrees=15),
         transforms.RandomVerticalFlip(),
-        transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
-        transforms.RandomErasing(p=0.2, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
+        # transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
+        # transforms.RandomErasing(p=0.2, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
     ]
 )
 
@@ -77,12 +82,15 @@ def load_data(fold_index):
     val_csv = str(INPUT_PATH / f"val_{fold_index}.csv")
     dataset = load_dataset("csv", data_files={"train": train_csv, "val": val_csv})
     dataset = dataset.map(process_dataset, with_indices=False, num_proc=12)
+    dataset["train"] = dataset["train"].shuffle(seed=42)
+    dataset["val"] = dataset["val"].shuffle(seed=42)
     print(f"Loaded {fold_index} dataset: {dataset}")
     return dataset
 
 
 EPOCHS = 50
-BATCH_SIZE = 128
+# BATCH_SIZE = 64
+BATCH_SIZE = 16
 
 id2label = {0: "benign", 1: "malignant"}
 label2id = {v: k for k, v in id2label.items()}
@@ -96,13 +104,13 @@ def compute_metrics(eval_pred):
     precision, recall, f1, _ = precision_recall_fscore_support(
         labels, predictions, average="binary"
     )
-    auc = roc_auc_score(labels, logits[:, 1])  # For binary classification
+    # auc = roc_auc_score(labels, logits[:, 1])  # For binary classification
     return {
         "accuracy": accuracy,
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        "auc": auc,
+        # "auc": auc,
     }
 
 
@@ -131,7 +139,7 @@ def train_model(
         # gradient_checkpointing=True, # slows down, saves memory
         dataloader_num_workers=8, # can this even help with current form of data loading?
         num_train_epochs=EPOCHS,
-        optim="adamw_bnb_8bit",
+        # optim="adamw_bnb_8bit",
         learning_rate=learning_rate,
         weight_decay=weight_decay_rate,
         push_to_hub=False,
@@ -139,11 +147,11 @@ def train_model(
         logging_strategy="steps",
         evaluation_strategy="steps",
         save_strategy="steps",
-        logging_steps=100,
-        save_steps=100,
-        # fp16=True,
-        bf16=True, # available only with +Ampere architecture (>=RTX 3000)
-        tf32=True,
+        logging_steps=400,
+        save_steps=400,
+        fp16=True,
+        # bf16=True, # available only with +Ampere architecture (>=RTX 3000)
+        # tf32=True,
         torch_compile=True,
         do_train=True,
         load_best_model_at_end=True,  # Load the best model at the end of training
@@ -208,11 +216,11 @@ def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate):
     """Saves the model information"""
     model_info = {
         "idx": fold_idx,
-        "MODEL_ID": MODEL_ID,
-        "ZOOM": ZOOM,
+        "model_id": MODEL_ID,
+        "zoom": ZOOM,
         "n_splits": 5,
-        "EPOCHS": EPOCHS,
-        "BATCH_SIZE": BATCH_SIZE,
+        "epochs": EPOCHS,
+        "batch_size": BATCH_SIZE,
         "learning_rate": learning_rate,
         "weight_decay_rate": weight_decay_rate,
     }
@@ -223,40 +231,45 @@ def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate):
 
 def main():
     """Main function"""
-    experiment_id = "ViT_PT_patches224_testperformance3"
-    fold_idx = 0
-    learning_rate = 3e-5
-    weight_decay_rate = 5e-3
+    # experiment_id = "ViT_PT_patches224_grid"
+    experiment_id = "ConvNext_PT_patches224_grid"
+    
+    learning_rate_values = [1e-5, 3e-5, 1e-4, 3e-4]
+    weight_decay_values = [1e-3, 5e-3, 1e-2]
+    # learning_rate = 3e-5
+    # weight_decay_rate = 5e-3
 
-    output_path = CWD / "results" / f"{ZOOM}x_{experiment_id}"
+    for learning_rate in learning_rate_values:
+        for weight_decay_rate in weight_decay_values:
+            output_path = CWD / "results" / f"{ZOOM}x_{experiment_id}_lr_{learning_rate}_wdr_{weight_decay_rate}"
 
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
-    else:
-        print(f"Directory {output_path} already exists. Skipping creation.")
+            if not os.path.exists(output_path):
+                os.makedirs(output_path)
+            else:
+                print(f"Directory {output_path} already exists. Skipping creation.")
 
-    only_one_fold = False
+            only_one_fold = False
 
-    if only_one_fold:
-        fold_idx = 0
-        print(f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:")
-        print(f"Learning rate: {learning_rate}")
-        print(f"Weight decay rate: {weight_decay_rate}")
-        run_fold(fold_idx, learning_rate, weight_decay_rate, output_path)
-    else:
-        for fold_idx in range(5):
-            p = multiprocessing.Process(
-                target=run_fold,
-                args=(
-                    fold_idx,
-                    learning_rate,
-                    weight_decay_rate,
-                    output_path,
-                ),
-            )
-            p.start()
-            p.join()  # This will block until p finishes execution
-            time.sleep(5)
+            if only_one_fold:
+                fold_idx = 0
+                print(f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:")
+                print(f"Learning rate: {learning_rate}")
+                print(f"Weight decay rate: {weight_decay_rate}")
+                run_fold(fold_idx, learning_rate, weight_decay_rate, output_path)
+            else:
+                for fold_idx in range(5):
+                    p = multiprocessing.Process(
+                        target=run_fold,
+                        args=(
+                            fold_idx,
+                            learning_rate,
+                            weight_decay_rate,
+                            output_path,
+                        ),
+                    )
+                    p.start()
+                    p.join()  # This will block until p finishes execution
+                    time.sleep(5)
 
 
 if __name__ == "__main__":
