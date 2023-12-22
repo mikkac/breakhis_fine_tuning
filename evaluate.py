@@ -24,26 +24,12 @@ from transformers import (
     TrainingArguments,
 )
 
-n_splits = 5
 
-cwd = Path().absolute()
-results_path = cwd / "results_good"
-
-best_metric = "eval_f1"
-
-output_paths = [
-    os.path.basename(f.path) for f in os.scandir(results_path) if f.is_dir()
-]
-
-
-def find_best_model_idx_and_acc(output_path):
+def find_best_model_idx_and_acc(n_splits, results_path, output_path):
     json_files = [
         results_path / output_path / f"model_{idx}" / "all_results.json"
         for idx in range(n_splits)
     ]
-    # csv_files = [results_path / output_path / f'train_metrics_{idx}.csv' for idx in range(n_splits)]
-    # csv_files = [results_path / f'train_metrics_{idx}.csv' for idx in range(n_splits)]
-    # dataframes = [pd.read_csv(file) for file in csv_files]
 
     best_model_index = None
     best_f1_score = 0.0
@@ -62,17 +48,16 @@ def find_best_model_idx_and_acc(output_path):
     print(f"Best model index: {best_model_index}, f1_score: {best_f1_score}")
     return best_model_index, best_f1_score
 
+def get_best_models(n_splits, results_path, output_paths):
+    best_models = {}
+    for output_path in output_paths:
+        best_models[str(results_path / output_path)] = find_best_model_idx_and_acc(
+            n_splits, results_path, output_path
+        )
 
-best_models = {}
-for output_path in output_paths:
-    best_models[str(results_path / output_path)] = find_best_model_idx_and_acc(
-        output_path
-    )
+    return best_models
 
-print(best_models)
-
-
-def calculate_mean_metrics(output_path):
+def calculate_mean_metrics(n_splits, results_path, output_path):
     numeric_columns = [
         "eval_accuracy",
         "eval_auc",
@@ -99,8 +84,6 @@ def calculate_mean_metrics(output_path):
     mean_metrics = df.mean()
     std_metrics = df.std()
 
-    # print(df)
-
     metrics = {
         metric_name: {
             "mean": mean_metrics[metric_name],
@@ -118,27 +101,14 @@ def calculate_mean_metrics(output_path):
 
     return metrics
 
-
-mean_metrics = []
-for output_path in output_paths:
-    mean_metrics.append(calculate_mean_metrics(output_path))
-
-
-for m in mean_metrics:
-    pprint.pprint(m)
-best_mean_val_metrics = max(mean_metrics, key=lambda x: x[best_metric]["mean"])
-
-best_model_output_path = best_mean_val_metrics["output_path"]
-best_model_index = best_models[best_model_output_path][0]
-with open(
-    results_path / best_model_output_path / f"model_info_{best_model_index}.json", "r"
-) as f:
-    best_model_info = json.load(f)
-
-input_path = cwd / f'breakhis_{best_model_info["zoom"]}x'
+def get_all_mean_val_metrics(n_splits, results_path, output_paths):
+    mean_metrics = []
+    for output_path in output_paths:
+        mean_metrics.append(calculate_mean_metrics(n_splits, results_path, output_path))
+    
+    return mean_metrics
 
 
-###############
 def process_example(image, image_processor):
     """Preprocesses an image for the model"""
     inputs = image_processor(image, return_tensors="pt")
@@ -245,7 +215,7 @@ def save_predictions(dataset, probabilities, output_path):
 
 
 def main_evaluation(
-    model_id, checkpoint_path, test_csv, batch_size, cpu_threads, results_path
+    model_id, checkpoint_path, test_csv, batch_size, cpu_threads, results_path, best_model_info, best_mean_val_metrics
 ):
     model = AutoModelForImageClassification.from_pretrained(checkpoint_path)
     image_processor = AutoImageProcessor.from_pretrained(model_id)
@@ -266,13 +236,42 @@ def main_evaluation(
         results_path / f"test_info.json",
     )
 
+def main():
+    # Constants
+    n_splits = 5
 
-model_id = best_model_info["model_id"]
-checkpoint_path = results_path / best_model_output_path / f"model_{best_model_index}"
-test_csv = str(input_path / "test.csv")
-batch_size = 16
-cpu_threads = psutil.cpu_count(logical=True)
+    cwd = Path().absolute()
+    results_path = cwd / "results_good"
 
-main_evaluation(
-    model_id, checkpoint_path, test_csv, batch_size, cpu_threads, results_path
-)
+    best_metric = "eval_f1"
+
+    output_paths = [
+        os.path.basename(f.path) for f in os.scandir(results_path) if f.is_dir()
+    ]
+
+    # Find best model
+    best_models = get_best_models(n_splits, results_path, output_paths)
+    mean_val_metrics = get_all_mean_val_metrics(n_splits, results_path, output_paths)
+
+    best_mean_val_metrics = max(mean_val_metrics, key=lambda x: x[best_metric]["mean"])
+
+    best_model_output_path = best_mean_val_metrics["output_path"]
+    best_model_index = best_models[best_model_output_path][0]
+    with open(
+        results_path / best_model_output_path / f"model_info_{best_model_index}.json", "r"
+    ) as f:
+        best_model_info = json.load(f)
+
+    # Run final evaluation on test dataset
+    model_id = best_model_info["model_id"]
+    checkpoint_path = results_path / best_model_output_path / f"model_{best_model_index}"
+    test_csv = str(cwd / f'breakhis_{best_model_info["zoom"]}x' / "test.csv")
+    batch_size = 16
+    cpu_threads = psutil.cpu_count(logical=True)
+
+    main_evaluation(
+        model_id, checkpoint_path, test_csv, batch_size, cpu_threads, results_path, best_model_info, best_mean_val_metrics
+    )
+
+if __name__ == "__main__":
+    main()
