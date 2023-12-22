@@ -15,7 +15,7 @@ import psutil
 import torch
 from datasets import config, load_dataset
 from PIL import Image
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from sklearn.metrics import accuracy_score, auc, confusion_matrix, precision_recall_curve, precision_recall_fscore_support, roc_auc_score
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 from transformers import (
@@ -118,21 +118,37 @@ label2id = {v: k for k, v in id2label.items()}
 
 
 def compute_metrics(eval_pred):
-    """Computes the metrics"""
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
+
+    # Compute basic metrics
     accuracy = accuracy_score(labels, predictions)
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        labels, predictions, average="binary"
-    )
-    # auc = roc_auc_score(labels, logits[:, 1])  # For binary classification
+    precision, recall, f1, _ = precision_recall_fscore_support(labels, predictions, average='binary')
+
+    # Apply softmax to logits to get probabilities
+    softmax_logits = torch.nn.functional.softmax(torch.tensor(logits), dim=-1).numpy()
+
+    # Compute ROC AUC
+    roc_auc = roc_auc_score(labels, softmax_logits[:, 1])
+
+    # Compute precision-recall curve and PR AUC
+    precision_curve, recall_curve, _ = precision_recall_curve(labels, softmax_logits[:, 1])
+    pr_auc = auc(recall_curve, precision_curve)
+
+    # Compute confusion matrix and specificity
+    tn, fp, fn, tp = confusion_matrix(labels, predictions).ravel()
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+
     return {
         "accuracy": accuracy,
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        # "auc": auc,
+        "roc_auc": roc_auc,    # Area under the ROC curve
+        "pr_auc": pr_auc,      # Area under the Precision-Recall curve
+        "specificity": specificity  # Specificity (True Negative Rate)
     }
+
 
 
 # Define the Trainer and train the model
