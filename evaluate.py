@@ -1,19 +1,16 @@
-from pathlib import Path
-from datasets import load_dataset
 import json
-from PIL import Image
 import os
+import pprint
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import pprint
 import psutil
+from datasets import load_dataset
+from PIL import Image
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-from transformers import (
-    AutoImageProcessor,
-    AutoModelForImageClassification,
-    Trainer,
-    TrainingArguments,
-)
+from transformers import (AutoImageProcessor, AutoModelForImageClassification,
+                          Trainer, TrainingArguments)
 
 n_splits = 5
 
