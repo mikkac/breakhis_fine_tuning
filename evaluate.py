@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import psutil
+import torch
 from datasets import load_dataset
 from PIL import Image
 from sklearn.metrics import (
@@ -16,7 +17,6 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
     roc_auc_score,
 )
-import torch
 from transformers import (
     AutoImageProcessor,
     AutoModelForImageClassification,
@@ -48,6 +48,7 @@ def find_best_model_idx_and_acc(n_splits, results_path, output_path):
     print(f"Best model index: {best_model_index}, f1_score: {best_f1_score}")
     return best_model_index, best_f1_score
 
+
 def get_best_models(n_splits, results_path, output_paths):
     best_models = {}
     for output_path in output_paths:
@@ -56,6 +57,7 @@ def get_best_models(n_splits, results_path, output_paths):
         )
 
     return best_models
+
 
 def calculate_mean_metrics(n_splits, results_path, output_path):
     numeric_columns = [
@@ -101,11 +103,12 @@ def calculate_mean_metrics(n_splits, results_path, output_path):
 
     return metrics
 
+
 def get_all_mean_val_metrics(n_splits, results_path, output_paths):
     mean_metrics = []
     for output_path in output_paths:
         mean_metrics.append(calculate_mean_metrics(n_splits, results_path, output_path))
-    
+
     return mean_metrics
 
 
@@ -187,6 +190,7 @@ def evaluate_model(model, test_dataset, batch_size, cpu_threads):
 
     return metrics, probabilities
 
+
 def save_test_info(best_model_info, val_metrics, test_metrics, model_path, output_path):
     info = {
         "best_model_info": best_model_info,
@@ -195,8 +199,9 @@ def save_test_info(best_model_info, val_metrics, test_metrics, model_path, outpu
         "test_metrics": test_metrics,
     }
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(info, f, indent=4)
+
 
 def save_predictions(dataset, probabilities, output_path):
     predicted_labels = np.argmax(probabilities, axis=-1)
@@ -215,7 +220,14 @@ def save_predictions(dataset, probabilities, output_path):
 
 
 def main_evaluation(
-    model_id, checkpoint_path, test_csv, batch_size, cpu_threads, results_path, best_model_info, best_mean_val_metrics
+    model_id,
+    checkpoint_path,
+    test_csv,
+    batch_size,
+    cpu_threads,
+    results_path,
+    best_model_info,
+    best_mean_val_metrics,
 ):
     model = AutoModelForImageClassification.from_pretrained(checkpoint_path)
     image_processor = AutoImageProcessor.from_pretrained(model_id)
@@ -235,6 +247,7 @@ def main_evaluation(
         checkpoint_path,
         results_path / f"test_info.json",
     )
+
 
 def main():
     # Constants
@@ -258,20 +271,31 @@ def main():
     best_model_output_path = best_mean_val_metrics["output_path"]
     best_model_index = best_models[best_model_output_path][0]
     with open(
-        results_path / best_model_output_path / f"model_info_{best_model_index}.json", "r"
+        results_path / best_model_output_path / f"model_info_{best_model_index}.json",
+        "r",
     ) as f:
         best_model_info = json.load(f)
 
     # Run final evaluation on test dataset
     model_id = best_model_info["model_id"]
-    checkpoint_path = results_path / best_model_output_path / f"model_{best_model_index}"
+    checkpoint_path = (
+        results_path / best_model_output_path / f"model_{best_model_index}"
+    )
     test_csv = str(cwd / f'breakhis_{best_model_info["zoom"]}x' / "test.csv")
     batch_size = 16
     cpu_threads = psutil.cpu_count(logical=True)
 
     main_evaluation(
-        model_id, checkpoint_path, test_csv, batch_size, cpu_threads, results_path, best_model_info, best_mean_val_metrics
+        model_id,
+        checkpoint_path,
+        test_csv,
+        batch_size,
+        cpu_threads,
+        results_path,
+        best_model_info,
+        best_mean_val_metrics,
     )
+
 
 if __name__ == "__main__":
     main()
