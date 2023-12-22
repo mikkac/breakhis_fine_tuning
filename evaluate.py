@@ -9,8 +9,12 @@ import psutil
 from datasets import load_dataset
 from PIL import Image
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-from transformers import (AutoImageProcessor, AutoModelForImageClassification,
-                          Trainer, TrainingArguments)
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,
+    Trainer,
+    TrainingArguments,
+)
 
 n_splits = 5
 
@@ -165,6 +169,7 @@ def compute_metrics(eval_pred):
         "f1": f1,
         # "auc": auc,
     }
+
 
 def evaluate_model(model, test_dataset, batch_size, cpu_threads):
     trainer = Trainer(
