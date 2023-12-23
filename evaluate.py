@@ -1,11 +1,11 @@
+""" Evaluates the best model on the test dataset. """
+
 import json
 import os
-import pprint
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import psutil
 import torch
 from datasets import load_dataset
 from PIL import Image
@@ -25,41 +25,44 @@ from transformers import (
 )
 
 
-def find_best_model_idx_and_acc(n_splits, results_path, output_path):
+def find_best_model_idx_and_metric(best_metric, n_splits, results_path, output_path):
+    """
+    Finds the best model index among all models stored in `results_path`.
+    The best model criterion is the one with the highest `best_metric` value, e.g. "eval_f1".
+    """
     json_files = [
         results_path / output_path / f"model_{idx}" / "all_results.json"
         for idx in range(n_splits)
     ]
 
     best_model_index = None
-    best_f1_score = 0.0
+    max_val = 0.0
 
     for i, json_files in enumerate(json_files):
-        with open(json_files) as json_file:
+        with open(json_files, encoding="utf-8") as json_file:
             data = json.load(json_file)
-            print(
-                f"Model {i}: e_acc: {data['eval_accuracy']:.3f}, e_loss: {data['eval_loss']:.3f}, e_f1: {data['eval_f1']:.3f}"
-            )
-            f1_score = data["eval_f1"]
-            if f1_score > best_f1_score:
-                best_f1_score = f1_score
+            current_val = data[best_metric]
+            if current_val > max_val:
+                max_val = current_val
                 best_model_index = i
 
-    print(f"Best model index: {best_model_index}, f1_score: {best_f1_score}")
-    return best_model_index, best_f1_score
+    print(f"Best model index: {best_model_index}, {best_metric}: {max_val}")
+    return best_model_index, max_val
 
 
-def get_best_models(n_splits, results_path, output_paths):
+def get_best_models(best_metric, n_splits, results_path, output_paths):
+    """Returns a dictionary with the best model index for each output path."""
     best_models = {}
     for output_path in output_paths:
-        best_models[str(results_path / output_path)] = find_best_model_idx_and_acc(
-            n_splits, results_path, output_path
+        best_models[str(results_path / output_path)] = find_best_model_idx_and_metric(
+            best_metric, n_splits, results_path, output_path
         )
 
     return best_models
 
 
 def calculate_mean_metrics(n_splits, results_path, output_path):
+    """Calculates the mean and standard deviation of the metrics for all models."""
     numeric_columns = [
         "eval_accuracy",
         "eval_auc",
@@ -77,7 +80,7 @@ def calculate_mean_metrics(n_splits, results_path, output_path):
 
     data_list = []
     for json_file in json_files:
-        with open(json_file) as f:
+        with open(json_file, encoding="utf-8") as f:
             data = json.load(f)
             data_list.append({k: v for k, v in data.items() if k in numeric_columns})
 
@@ -95,7 +98,9 @@ def calculate_mean_metrics(n_splits, results_path, output_path):
     }
 
     with open(
-        results_path / output_path / "train_metrics_mean_with_std.json", "w"
+        results_path / output_path / "train_metrics_mean_with_std.json",
+        "w",
+        encoding="utf-8",
     ) as f:
         json.dump(metrics, f, indent=4)
 
@@ -105,6 +110,10 @@ def calculate_mean_metrics(n_splits, results_path, output_path):
 
 
 def get_all_mean_val_metrics(n_splits, results_path, output_paths):
+    """
+    Returns a list of dictionaries with the mean and
+    standard deviation of the metrics for all models.
+    """
     mean_metrics = []
     for output_path in output_paths:
         mean_metrics.append(calculate_mean_metrics(n_splits, results_path, output_path))
@@ -126,6 +135,7 @@ def process_dataset(example, image_processor):
 
 
 def load_test_data(test_csv, image_processor):
+    """Loads the test dataset and preprocesses it for the model"""
     dataset = load_dataset("csv", data_files={"test": test_csv})
     dataset = dataset.map(
         lambda e: process_dataset(e, image_processor), with_indices=False, num_proc=2
@@ -136,11 +146,11 @@ def load_test_data(test_csv, image_processor):
 
 
 def compute_metrics(eval_pred):
+    """Computes the metrics for the evaluation"""
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
 
     # Compute basic metrics
-    accuracy = accuracy_score(labels, predictions)
     precision, recall, f1, _ = precision_recall_fscore_support(
         labels, predictions, average="binary"
     )
@@ -148,31 +158,27 @@ def compute_metrics(eval_pred):
     # Apply softmax to logits to get probabilities
     softmax_logits = torch.nn.functional.softmax(torch.tensor(logits), dim=-1).numpy()
 
-    # Compute ROC AUC
-    roc_auc = roc_auc_score(labels, softmax_logits[:, 1])
-
     # Compute precision-recall curve and PR AUC
     precision_curve, recall_curve, _ = precision_recall_curve(
         labels, softmax_logits[:, 1]
     )
-    pr_auc = auc(recall_curve, precision_curve)
-
     # Compute confusion matrix and specificity
-    tn, fp, fn, tp = confusion_matrix(labels, predictions).ravel()
+    tn, fp, _fn, _tp = confusion_matrix(labels, predictions).ravel()
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
 
     return {
-        "accuracy": accuracy,
+        "accuracy": accuracy_score(labels, predictions),
         "precision": precision,
         "recall": recall,
         "specificity": specificity,
         "f1": f1,
-        "roc_auc": roc_auc,
-        "pr_auc": pr_auc,
+        "roc_auc": roc_auc_score(labels, softmax_logits[:, 1]),
+        "pr_auc": auc(recall_curve, precision_curve),
     }
 
 
 def evaluate_model(model, test_dataset, batch_size, cpu_threads):
+    """Evaluates the best model on the test dataset"""
     trainer = Trainer(
         model=model,
         compute_metrics=compute_metrics,
@@ -192,6 +198,13 @@ def evaluate_model(model, test_dataset, batch_size, cpu_threads):
 
 
 def save_test_info(best_model_info, val_metrics, test_metrics, model_path, output_path):
+    """
+    Saves the test info to a json file. This includes:
+    * The best model info
+    * The path to the best model
+    * The average validation metrics
+    * The test metrics
+    """
     info = {
         "best_model_info": best_model_info,
         "model_path": str(model_path),
@@ -199,11 +212,18 @@ def save_test_info(best_model_info, val_metrics, test_metrics, model_path, outpu
         "test_metrics": test_metrics,
     }
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(info, f, indent=4)
 
 
 def save_predictions(dataset, probabilities, output_path):
+    """
+    Saves the test predictions to a csv file. Following columns are saved:
+    * The sample's file name
+    * The sample's true label
+    * The sample's predicted label
+    * The sample's probabilities of being label 0 and 1
+    """
     predicted_labels = np.argmax(probabilities, axis=-1)
 
     df = pd.DataFrame(
@@ -221,14 +241,19 @@ def save_predictions(dataset, probabilities, output_path):
 
 def main_evaluation(
     model_id,
-    checkpoint_path,
     test_csv,
-    batch_size,
-    cpu_threads,
     results_path,
     best_model_info,
     best_mean_val_metrics,
 ):
+    """Runs the main evaluation on the test dataset"""
+    batch_size = 16
+    cpu_threads = 2
+    checkpoint_path = (
+        results_path
+        / best_mean_val_metrics["output_path"]
+        / f"model_{best_model_info['idx']}"
+    )
     model = AutoModelForImageClassification.from_pretrained(checkpoint_path)
     image_processor = AutoImageProcessor.from_pretrained(model_id)
     test_dataset = load_test_data(test_csv, image_processor)
@@ -238,18 +263,19 @@ def main_evaluation(
     save_predictions(
         test_dataset["test"],
         probabilities,
-        results_path / f"test_predictions.csv",
+        results_path / "test_predictions.csv",
     )
     save_test_info(
         best_model_info,
         best_mean_val_metrics,
         test_metrics,
         checkpoint_path,
-        results_path / f"test_info.json",
+        results_path / "test_info.json",
     )
 
 
 def main():
+    """Main function"""
     # Constants
     n_splits = 5
 
@@ -263,7 +289,7 @@ def main():
     ]
 
     # Find best model
-    best_models = get_best_models(n_splits, results_path, output_paths)
+    best_models = get_best_models(best_metric, n_splits, results_path, output_paths)
     mean_val_metrics = get_all_mean_val_metrics(n_splits, results_path, output_paths)
 
     best_mean_val_metrics = max(mean_val_metrics, key=lambda x: x[best_metric]["mean"])
@@ -273,24 +299,17 @@ def main():
     with open(
         results_path / best_model_output_path / f"model_info_{best_model_index}.json",
         "r",
+        encoding="utf-8",
     ) as f:
         best_model_info = json.load(f)
 
     # Run final evaluation on test dataset
     model_id = best_model_info["model_id"]
-    checkpoint_path = (
-        results_path / best_model_output_path / f"model_{best_model_index}"
-    )
     test_csv = str(cwd / f'breakhis_{best_model_info["zoom"]}x' / "test.csv")
-    batch_size = 16
-    cpu_threads = psutil.cpu_count(logical=True)
 
     main_evaluation(
         model_id,
-        checkpoint_path,
         test_csv,
-        batch_size,
-        cpu_threads,
         results_path,
         best_model_info,
         best_mean_val_metrics,
