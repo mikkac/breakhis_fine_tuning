@@ -3,3 +3,4 @@ output*
 results*
 .ruff_cache*
 runs*
+data*
