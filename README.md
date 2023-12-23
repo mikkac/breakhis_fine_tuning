@@ -51,3 +51,14 @@ The BreakHis dataset can be downloaded from [Kaggle](https://www.kaggle.com/data
    ```bash
    pip list
    ```
+
+### Fine-tune
+
+#### Prepare data
+TBA
+
+#### Run training
+TBA
+
+#### Run evaluation
+TBA
