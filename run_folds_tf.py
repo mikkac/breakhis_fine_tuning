@@ -13,6 +13,6 @@ for learning_rate in learning_rate_values:
         weight_decay_str = str(weight_decay_rate).replace(".", "_")
         experiment_id = f"lr_{learning_rate_str}_wd_{weight_decay_str}"
         for fold_idx in fold_idx_range:
-            command = f"python run_fold.py --experiment_id {experiment_id} --fold_idx {fold_idx} --weight_decay_rate {weight_decay_rate} --learning_rate {learning_rate}"
+            command = f"python run_fold_tf.py --experiment_id {experiment_id} --fold_idx {fold_idx} --weight_decay_rate {weight_decay_rate} --learning_rate {learning_rate}"
             os.system(command)
             time.sleep(5)
