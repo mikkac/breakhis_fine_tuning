@@ -15,7 +15,14 @@ import psutil
 import torch
 from datasets import config, load_dataset
 from PIL import Image
-from sklearn.metrics import accuracy_score, auc, confusion_matrix, precision_recall_curve, precision_recall_fscore_support, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    auc,
+    confusion_matrix,
+    precision_recall_curve,
+    precision_recall_fscore_support,
+    roc_auc_score,
+)
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 from transformers import (
@@ -48,32 +55,10 @@ MODEL_ID = "facebook/convnext-base-224-22k"
 # MODEL_ID = "microsoft/swin-base-patch4-window7-224-in22k"
 
 IMAGE_PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_ID)
-ZOOM = 400
-
-# Define file paths
-CWD = Path().absolute()
-INPUT_PATH = CWD / f"breakhis_{ZOOM}x"
-
-_transforms = transforms.Compose(
-    [
-        # transforms.RandomResizedCrop(size=224),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(degrees=15),
-        transforms.RandomVerticalFlip(),
-        # transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
-        # transforms.RandomErasing(p=0.2, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
-    ]
-)
-
-to_tensor = transforms.ToTensor()
-to_image = transforms.ToPILImage()
-
 
 def process_example(image):
     """Preprocesses an image for the model"""
-    inputs = IMAGE_PROCESSOR(
-        to_image(_transforms(to_tensor(image))), return_tensors="pt"
-    )
+    inputs = IMAGE_PROCESSOR(image, return_tensors="pt")
     return inputs["pixel_values"].squeeze(0)
 
 
@@ -90,10 +75,10 @@ def print_first_patient_ids(dataset, n=10):
         print(dataset[i]["patient_id"])
 
 
-def load_data(fold_index):
+def load_data(fold_index, input_path):
     """Loads the dataset"""
-    train_csv = str(INPUT_PATH / f"train_{fold_index}.csv")
-    val_csv = str(INPUT_PATH / f"val_{fold_index}.csv")
+    train_csv = str(input_path / f"train_{fold_index}.csv")
+    val_csv = str(input_path / f"val_{fold_index}.csv")
     dataset = load_dataset(
         "csv", data_files={"train": train_csv, "val": val_csv}, keep_in_memory=True
     )
@@ -109,13 +94,8 @@ def load_data(fold_index):
     return dataset
 
 
-EPOCHS = 50
-# BATCH_SIZE = 64
-BATCH_SIZE = 16
-
 id2label = {0: "benign", 1: "malignant"}
 label2id = {v: k for k, v in id2label.items()}
-
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
@@ -123,7 +103,9 @@ def compute_metrics(eval_pred):
 
     # Compute basic metrics
     accuracy = accuracy_score(labels, predictions)
-    precision, recall, f1, _ = precision_recall_fscore_support(labels, predictions, average='binary')
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        labels, predictions, average="binary"
+    )
 
     # Apply softmax to logits to get probabilities
     softmax_logits = torch.nn.functional.softmax(torch.tensor(logits), dim=-1).numpy()
@@ -132,7 +114,9 @@ def compute_metrics(eval_pred):
     roc_auc = roc_auc_score(labels, softmax_logits[:, 1])
 
     # Compute precision-recall curve and PR AUC
-    precision_curve, recall_curve, _ = precision_recall_curve(labels, softmax_logits[:, 1])
+    precision_curve, recall_curve, _ = precision_recall_curve(
+        labels, softmax_logits[:, 1]
+    )
     pr_auc = auc(recall_curve, precision_curve)
 
     # Compute confusion matrix and specificity
@@ -144,16 +128,15 @@ def compute_metrics(eval_pred):
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        "roc_auc": roc_auc,    # Area under the ROC curve
-        "pr_auc": pr_auc,      # Area under the Precision-Recall curve
-        "specificity": specificity  # Specificity (True Negative Rate)
+        "roc_auc": roc_auc,  # Area under the ROC curve
+        "pr_auc": pr_auc,  # Area under the Precision-Recall curve
+        "specificity": specificity,  # Specificity (True Negative Rate)
     }
-
 
 
 # Define the Trainer and train the model
 def train_model(
-    fold_idx, train_dataset, val_dataset, learning_rate, weight_decay_rate, output_path
+    fold_idx, train_dataset, val_dataset, learning_rate, weight_decay_rate, epochs, batch_size, output_path
 ):  # pylint: disable=R0913
     """Trains the model"""
     model = AutoModelForImageClassification.from_pretrained(
@@ -170,12 +153,12 @@ def train_model(
     )
     training_args = TrainingArguments(
         output_dir=str(output_path / f"model_{fold_idx}"),
-        per_device_train_batch_size=BATCH_SIZE,
-        per_device_eval_batch_size=BATCH_SIZE,
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=batch_size,
         # gradient_accumulation_steps=4, # slows down, saves memory
         # gradient_checkpointing=True, # slows down, saves memory
         dataloader_num_workers=CPU_THREADS,  # can this even help with current form of data loading?
-        num_train_epochs=EPOCHS,
+        num_train_epochs=epochs,
         optim="adamw_bnb_8bit",
         learning_rate=learning_rate,
         weight_decay=weight_decay_rate,
@@ -223,13 +206,13 @@ def train_model(
     return model, train_result.metrics, eval_metrics
 
 
-def run_fold(fold_idx, learning_rate, weight_decay_rate, output_path):
+def run_fold(fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_size, input_path, output_path):
     """Runs the training process for one fold"""
     print(f"Starting experiment with fold {fold_idx}. Hyperparams:")
     print(f"Learning rate: {learning_rate}")
     print(f"Weight decay rate: {weight_decay_rate}")
 
-    dataset = load_data(fold_idx)
+    dataset = load_data(fold_idx, input_path)
 
     train_dataset = dataset["train"]
     val_dataset = dataset["val"]
@@ -240,24 +223,26 @@ def run_fold(fold_idx, learning_rate, weight_decay_rate, output_path):
         val_dataset,
         learning_rate,
         weight_decay_rate,
+        epochs,
+        batch_size,
         output_path,
     )
     print(f"Fold {fold_idx} finished")
     print(f"Train metrics: {train_metrics}")
     print(f"Evaluation metrics: {eval_metrics}")
 
-    save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate)
+    save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_size)
 
 
-def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate):
+def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_size):
     """Saves the model information"""
     model_info = {
         "idx": fold_idx,
         "model_id": MODEL_ID,
-        "zoom": ZOOM,
+        "zoom": zoom,
         "n_splits": 5,
-        "epochs": EPOCHS,
-        "batch_size": BATCH_SIZE,
+        "epochs": epochs,
+        "batch_size": batch_size,
         "learning_rate": learning_rate,
         "weight_decay_rate": weight_decay_rate,
     }
@@ -269,50 +254,66 @@ def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate):
 def main():
     """Main function"""
     # experiment_id = "ViT_PT_patches224_grid"
-    experiment_id = "ConvNext_PT_patches224_grid"
+    cwd = Path().absolute()
+    zoom = 400
+    scenarios = (
+        "original",
+        # "patches_fixed",
+        # "patches_fixed_with_random",
+        # "patches_fixed_with_random_with_transformations",
+        # "patches_fixed_with_random_with_filtered_cells",
+        # "patches_fixed_with_random_with_filtered_background",
+    )
+    learning_rate = 3e-5
+    weight_decay_rate = 5e-3
+    
 
-    # learning_rate_values = [1e-5, 3e-5, 1e-4, 3e-4]
-    # weight_decay_values = [1e-3, 5e-3, 1e-2]
-    learning_rate_values = [3e-5]
-    weight_decay_values = [5e-3]
+    epochs = 50
+    # batch_size = 64
+    batch_size = 16
+    for scenario in scenarios:
+        experiment_id = f"ConvNext_{scenario}"
+        lr_f = f"{learning_rate:.0e}".replace(".", "p")
+        wdr_f = f"{weight_decay_rate:.0e}".replace(".", "p")
+        cur_dt_f = datetime.now().strftime("%Y_%m_%d_%H_%M")
+        input_path = cwd / "data" / f"{zoom}x" / scenario
+        output_path = (
+            cwd / "results" / f"{zoom}x_{experiment_id}_lr_{lr_f}_wdr_{wdr_f}_{cur_dt_f}"
+        )
 
-    for learning_rate in learning_rate_values:
-        for weight_decay_rate in weight_decay_values:
-            lr_f = f"{learning_rate:.0e}".replace(".", "p")
-            wdr_f = f"{weight_decay_rate:.0e}".replace(".", "p")
-            cur_dt_f = datetime.now().strftime("%Y_%m_%d_%H_%M")
-            output_path = (
-                CWD
-                / "results"
-                / f"{ZOOM}x_{experiment_id}_lr_{lr_f}_wdr_{wdr_f}_{cur_dt_f}"
-            )
+        os.makedirs(output_path, exist_ok=True)
+        print(f"Directory {output_path} created.")
 
-            os.makedirs(output_path, exist_ok=True)
-            print(f"Directory {output_path} created.")
-
-            only_one_fold = False
-            if only_one_fold:
-                fold_idx = 0
-                print(
-                    f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:"
-                )
+        only_one_fold = False
+        if only_one_fold:
+            fold_idx = 0
+            print(f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:")
+            print(f"Scenario: {scenario}")
+            print(f"Learning rate: {learning_rate}")
+            print(f"Weight decay rate: {weight_decay_rate}")
+            run_fold(fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_size, input_path, output_path)
+        else:
+            for fold_idx in range(5):
+                print(f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:")
+                print(f"Scenario: {scenario}")
                 print(f"Learning rate: {learning_rate}")
                 print(f"Weight decay rate: {weight_decay_rate}")
-                run_fold(fold_idx, learning_rate, weight_decay_rate, output_path)
-            else:
-                for fold_idx in range(5):
-                    p = multiprocessing.Process(
-                        target=run_fold,
-                        args=(
-                            fold_idx,
-                            learning_rate,
-                            weight_decay_rate,
-                            output_path,
-                        ),
-                    )
-                    p.start()
-                    p.join()  # This will block until p finishes execution
-                    time.sleep(5)
+                p = multiprocessing.Process(
+                    target=run_fold,
+                    args=(
+                        fold_idx,
+                        learning_rate,
+                        weight_decay_rate,
+                        zoom,
+                        epochs,
+                        batch_size,
+                        input_path,
+                        output_path,
+                    ),
+                )
+                p.start()
+                p.join()  # This will block until p finishes execution
+                time.sleep(5)
 
 
 if __name__ == "__main__":
