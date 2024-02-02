@@ -24,7 +24,6 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from torch.utils.tensorboard import SummaryWriter
-from torchvision import transforms
 from transformers import (
     AutoImageProcessor,
     AutoModelForImageClassification,
@@ -48,8 +47,8 @@ CPU_THREADS = psutil.cpu_count(logical=True)
 print(f"Number of available CPU threads: {CPU_THREADS}")
 
 
-# MODEL_ID = "google/vit-base-patch16-224"
-MODEL_ID = "facebook/convnext-base-224-22k"
+MODEL_ID = "google/vit-base-patch16-224"
+# MODEL_ID = "facebook/convnext-base-224-22k"
 # MODEL_ID = "facebook/deit-base-patch16-224"
 # MODEL_ID = "facebook/deit-base-distilled-patch16-224"
 # MODEL_ID = "microsoft/swin-base-patch4-window7-224-in22k"
@@ -253,16 +252,15 @@ def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate, zoo
 
 def main():
     """Main function"""
-    # experiment_id = "ViT_PT_patches224_grid"
     cwd = Path().absolute()
     zoom = 400
     scenarios = (
         "original",
-        # "patches_fixed",
-        # "patches_fixed_with_random",
-        # "patches_fixed_with_random_with_transformations",
-        # "patches_fixed_with_random_with_filtered_cells",
-        # "patches_fixed_with_random_with_filtered_background",
+        "patches_fixed",
+        "patches_fixed_with_random",
+        "patches_fixed_with_random_with_transformations",
+        "patches_fixed_with_random_with_filtered_cells",
+        "patches_fixed_with_random_with_filtered_background",
     )
     learning_rate = 3e-5
     weight_decay_rate = 5e-3
@@ -272,7 +270,8 @@ def main():
     # batch_size = 64
     batch_size = 16
     for scenario in scenarios:
-        experiment_id = f"ConvNext_{scenario}"
+        experiment_id = f"ViT_{scenario}"
+        # experiment_id = f"ConvNext_{scenario}"
         lr_f = f"{learning_rate:.0e}".replace(".", "p")
         wdr_f = f"{weight_decay_rate:.0e}".replace(".", "p")
         cur_dt_f = datetime.now().strftime("%Y_%m_%d_%H_%M")
