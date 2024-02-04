@@ -47,11 +47,8 @@ CPU_THREADS = psutil.cpu_count(logical=True)
 print(f"Number of available CPU threads: {CPU_THREADS}")
 
 
-MODEL_ID = "google/vit-base-patch16-224"
-# MODEL_ID = "facebook/convnext-base-224-22k"
-# MODEL_ID = "facebook/deit-base-patch16-224"
-# MODEL_ID = "facebook/deit-base-distilled-patch16-224"
-# MODEL_ID = "microsoft/swin-base-patch4-window7-224-in22k"
+# MODEL_ID, EXPERIMENT_PREFIX = "google/vit-base-patch16-224", "ViT"
+MODEL_ID, EXPERIMENT_PREFIX = "facebook/convnext-base-224-22k", "ConvNext"
 
 IMAGE_PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_ID)
 
@@ -79,7 +76,7 @@ def load_data(fold_index, input_path):
     train_csv = str(input_path / f"train_{fold_index}.csv")
     val_csv = str(input_path / f"val_{fold_index}.csv")
     dataset = load_dataset(
-        "csv", data_files={"train": train_csv, "val": val_csv}, keep_in_memory=True
+        "csv", data_files={"train": train_csv, "val": val_csv}, keep_in_memory=False
     )
     dataset = dataset.map(process_dataset, with_indices=False, num_proc=CPU_THREADS)
     dataset["train"] = dataset["train"].shuffle(seed=42)
@@ -168,6 +165,7 @@ def train_model(
         save_strategy="steps",
         logging_steps=250,
         save_steps=250,
+        save_total_limit=1,
         # fp16=True,
         bf16=True,  # available only with +Ampere architecture (>=RTX 3000)
         tf32=True,
@@ -176,7 +174,6 @@ def train_model(
         load_best_model_at_end=True,  # Load the best model at the end of training
         metric_for_best_model="eval_loss",  # Choose the metric to monitor for early stopping
         greater_is_better=False,  # Early stop when the metric is decreasing
-        report_to=["tensorboard"],
     )
 
     trainer = Trainer(
@@ -187,10 +184,9 @@ def train_model(
         compute_metrics=compute_metrics,
         callbacks=[
             EarlyStoppingCallback(
-                early_stopping_patience=7, early_stopping_threshold=0.0
+                early_stopping_patience=4, early_stopping_threshold=0.001
             ),
             PrinterCallback(),
-            TensorBoardCallback(SummaryWriter()),
         ],
     )
 
@@ -270,8 +266,7 @@ def main():
     # batch_size = 64
     batch_size = 16
     for scenario in scenarios:
-        experiment_id = f"ViT_{scenario}"
-        # experiment_id = f"ConvNext_{scenario}"
+        experiment_id = f"{EXPERIMENT_PREFIX}_{scenario}"
         lr_f = f"{learning_rate:.0e}".replace(".", "p")
         wdr_f = f"{weight_decay_rate:.0e}".replace(".", "p")
         cur_dt_f = datetime.now().strftime("%Y_%m_%d_%H_%M")
