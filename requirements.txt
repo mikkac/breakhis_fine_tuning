@@ -1,6 +1,6 @@
-torch @ https://download.pytorch.org/whl/cu121/torch-1.12.0%2Bcu121-cp311-cp311-win_amd64.whl
-torchvision @ https://download.pytorch.org/whl/cu121/torchvision-0.13.0%2Bcu121-cp311-cp311-win_amd64.whl
-torchaudio @ https://download.pytorch.org/whl/cu121/torchaudio-0.12.0%2Bcu121-cp311-cp311-win_amd64.whl
+torch
+torchvision
+torchaudio
 transformers>=4.0.0
 datasets>=1.0.0
 accelerate>=0.25.0
