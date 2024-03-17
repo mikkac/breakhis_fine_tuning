@@ -54,6 +54,7 @@ def get_best_models(best_metric, n_splits, results_path, output_paths):
     """Returns a dictionary with the best model index for each output path."""
     best_models = {}
     for output_path in output_paths:
+        print(f"Looking for a best model index in {output_path}")
         best_models[str(results_path / output_path)] = find_best_model_idx_and_metric(
             best_metric, n_splits, results_path, output_path
         )
@@ -138,7 +139,7 @@ def load_test_data(test_csv, image_processor):
     """Loads the test dataset and preprocesses it for the model"""
     dataset = load_dataset("csv", data_files={"test": test_csv})
     dataset = dataset.map(
-        lambda e: process_dataset(e, image_processor), with_indices=False, num_proc=2
+        lambda e: process_dataset(e, image_processor), with_indices=False, num_proc=1
     )
     print(f"Loaded test dataset: {len(dataset['test'])} samples")
 
@@ -249,12 +250,28 @@ def main_evaluation(
     """Runs the main evaluation on the test dataset"""
     batch_size = 16
     cpu_threads = 2
-    checkpoint_path = (
+    trainer_state_path = (
         results_path
         / best_mean_val_metrics["output_path"]
         / f"model_{best_model_info['idx']}"
+        / "trainer_state.json"
     )
-    model = AutoModelForImageClassification.from_pretrained(checkpoint_path)
+
+    with open(trainer_state_path, "r", encoding="utf-8") as f:
+        trainer_state = json.load(f)
+
+    best_checkpoint_id = trainer_state["best_model_checkpoint"].split("/")[
+        -1
+    ]  # e.g. "checkpoint-1000"
+
+    best_checkpoint_path = (
+        results_path
+        / best_mean_val_metrics["output_path"]
+        / f"model_{best_model_info['idx']}"
+        / best_checkpoint_id
+    )
+    print("Loading model from:", best_checkpoint_path)
+    model = AutoModelForImageClassification.from_pretrained(best_checkpoint_path)
     image_processor = AutoImageProcessor.from_pretrained(model_id)
     test_dataset = load_test_data(test_csv, image_processor)
     test_metrics, probabilities = evaluate_model(
@@ -269,20 +286,14 @@ def main_evaluation(
         best_model_info,
         best_mean_val_metrics,
         test_metrics,
-        checkpoint_path,
+        best_checkpoint_path,
         results_path / "test_info.json",
     )
 
 
-def main():
-    """Main function"""
-    # Constants
-    n_splits = 5
-
-    cwd = Path().absolute()
-    results_path = cwd / "results_good"
-
-    best_metric = "eval_f1"
+def run_evaluation(results_path, data_base_dir, scenario, n_splits):
+    # best_metric = "eval_f1"
+    best_metric = "eval_loss"
 
     output_paths = [
         os.path.basename(f.path) for f in os.scandir(results_path) if f.is_dir()
@@ -292,7 +303,8 @@ def main():
     best_models = get_best_models(best_metric, n_splits, results_path, output_paths)
     mean_val_metrics = get_all_mean_val_metrics(n_splits, results_path, output_paths)
 
-    best_mean_val_metrics = max(mean_val_metrics, key=lambda x: x[best_metric]["mean"])
+    # best_mean_val_metrics = max(mean_val_metrics, key=lambda x: x[best_metric]["mean"])
+    best_mean_val_metrics = min(mean_val_metrics, key=lambda x: x[best_metric]["mean"])
 
     best_model_output_path = best_mean_val_metrics["output_path"]
     best_model_index = best_models[best_model_output_path][0]
@@ -305,7 +317,9 @@ def main():
 
     # Run final evaluation on test dataset
     model_id = best_model_info["model_id"]
-    test_csv = str(cwd / f'breakhis_{best_model_info["zoom"]}x' / "test.csv")
+    test_csv = str(
+        data_base_dir / f'{best_model_info["zoom"]}x' / scenario / "test.csv"
+    )
 
     main_evaluation(
         model_id,
@@ -314,6 +328,37 @@ def main():
         best_model_info,
         best_mean_val_metrics,
     )
+
+
+def main():
+    """Main function"""
+    n_splits = 5
+    cwd = Path().absolute()
+
+    zooms = [
+        400,
+    ]
+
+    models = [
+        "vit",
+        "convnext",
+    ]
+
+    scenarios = [
+        "original",
+        "patches_fixed",
+        "patches_fixed_with_random",
+        "patches_fixed_with_random_with_transformations",
+        "patches_fixed_with_random_with_filtered_cells",
+        "patches_fixed_with_random_with_filtered_background",
+    ]
+
+    for zoom in zooms:
+        for model in models:
+            for scenario in scenarios:
+                print("Running evaluation for:", zoom, model, scenario)
+                results_path = cwd / "all_results" / f"{zoom}" / model / scenario
+                run_evaluation(results_path, cwd / "data", scenario, n_splits)
 
 
 if __name__ == "__main__":

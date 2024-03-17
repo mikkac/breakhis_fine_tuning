@@ -22,7 +22,7 @@ preprocessing_scenarios = {
 }
 
 chosen_scenario = "patches"
-zoom = 400
+zoom = 100
 
 cwd = Path().absolute()
 main_dir = Path().absolute().parent.parent
@@ -216,30 +216,30 @@ preprocessing_scenarios = {
     "patches_fixed_with_random_with_filtered_background": None,
 }
 
-preprocessing_scenarios["patches_fixed"] = lambda df, scenario_name: patches(
-    original_df=df,
-    scenario_name=scenario_name,
-    num_random_patches=0,
-    transformations=None,
-)
+# preprocessing_scenarios["patches_fixed"] = lambda df, scenario_name: patches(
+#     original_df=df,
+#     scenario_name=scenario_name,
+#     num_random_patches=0,
+#     transformations=None,
+# )
 
-preprocessing_scenarios[
-    "patches_fixed_with_random"
-] = lambda df, scenario_name: patches(
-    original_df=df,
-    scenario_name=scenario_name,
-    num_random_patches=5,
-    transformations=None,
-)
+# preprocessing_scenarios[
+#     "patches_fixed_with_random"
+# ] = lambda df, scenario_name: patches(
+#     original_df=df,
+#     scenario_name=scenario_name,
+#     num_random_patches=5,
+#     transformations=None,
+# )
 
-preprocessing_scenarios[
-    "patches_fixed_with_random_with_transformations"
-] = lambda df, scenario_name: patches(
-    original_df=df,
-    scenario_name=scenario_name,
-    num_random_patches=5,
-    transformations=transformations,
-)
+# preprocessing_scenarios[
+#     "patches_fixed_with_random_with_transformations"
+# ] = lambda df, scenario_name: patches(
+#     original_df=df,
+#     scenario_name=scenario_name,
+#     num_random_patches=5,
+#     transformations=transformations,
+# )
 
 preprocessing_scenarios[
     "patches_fixed_with_random_with_filtered_cells"
@@ -345,9 +345,17 @@ class StratifiedGroupKFold:
             test_indices = np.concatenate(
                 [np.array(test_bucket[label]) for label in test_bucket])
 
-            train_indices = index_map[train_indices]
-            test_indices = index_map[test_indices]
-            
+            train_indices = train_indices.astype(int) 
+            test_indices = test_indices.astype(int)
+
+            try:
+                train_indices = index_map[train_indices]
+                test_indices = index_map[test_indices]
+            except IndexError as e:
+                print(f"Train indices ({len(train_indices)}): {train_indices}")
+                print(f"Test indices ({len(test_indices)}): {test_indices}")
+                raise e
+
             assert len(np.intersect1d(
                 np.unique(group_ids.iloc[train_indices]), np.unique(group_ids.iloc[test_indices]))) == 0
 

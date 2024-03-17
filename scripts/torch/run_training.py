@@ -49,8 +49,10 @@ print(f"Number of available CPU threads: {CPU_THREADS}")
 
 # MODEL_ID, EXPERIMENT_PREFIX = "google/vit-base-patch16-224", "ViT"
 MODEL_ID, EXPERIMENT_PREFIX = "facebook/convnext-base-224-22k", "ConvNext"
+# MODEL_ID, EXPERIMENT_PREFIX = "microsoft/swin-base-patch4-window7-224-in22k", "Swin"
 
 IMAGE_PROCESSOR = AutoImageProcessor.from_pretrained(MODEL_ID)
+
 
 def process_example(image):
     """Preprocesses an image for the model"""
@@ -93,6 +95,7 @@ def load_data(fold_index, input_path):
 id2label = {0: "benign", 1: "malignant"}
 label2id = {v: k for k, v in id2label.items()}
 
+
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
@@ -132,7 +135,14 @@ def compute_metrics(eval_pred):
 
 # Define the Trainer and train the model
 def train_model(
-    fold_idx, train_dataset, val_dataset, learning_rate, weight_decay_rate, epochs, batch_size, output_path
+    fold_idx,
+    train_dataset,
+    val_dataset,
+    learning_rate,
+    weight_decay_rate,
+    epochs,
+    batch_size,
+    output_path,
 ):  # pylint: disable=R0913
     """Trains the model"""
     model = AutoModelForImageClassification.from_pretrained(
@@ -155,6 +165,7 @@ def train_model(
         # gradient_checkpointing=True, # slows down, saves memory
         dataloader_num_workers=CPU_THREADS,  # can this even help with current form of data loading?
         num_train_epochs=epochs,
+        # eval_delay=4,    # evaluate after 4 epochs
         optim="adamw_bnb_8bit",
         learning_rate=learning_rate,
         weight_decay=weight_decay_rate,
@@ -184,7 +195,7 @@ def train_model(
         compute_metrics=compute_metrics,
         callbacks=[
             EarlyStoppingCallback(
-                early_stopping_patience=4, early_stopping_threshold=0.001
+                early_stopping_patience=6, early_stopping_threshold=0.001
             ),
             PrinterCallback(),
         ],
@@ -201,7 +212,16 @@ def train_model(
     return model, train_result.metrics, eval_metrics
 
 
-def run_fold(fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_size, input_path, output_path):
+def run_fold(
+    fold_idx,
+    learning_rate,
+    weight_decay_rate,
+    zoom,
+    epochs,
+    batch_size,
+    input_path,
+    output_path,
+):
     """Runs the training process for one fold"""
     print(f"Starting experiment with fold {fold_idx}. Hyperparams:")
     print(f"Learning rate: {learning_rate}")
@@ -226,10 +246,20 @@ def run_fold(fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_siz
     print(f"Train metrics: {train_metrics}")
     print(f"Evaluation metrics: {eval_metrics}")
 
-    save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_size)
+    save_model_info(
+        output_path,
+        fold_idx,
+        learning_rate,
+        weight_decay_rate,
+        zoom,
+        epochs,
+        batch_size,
+    )
 
 
-def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_size):
+def save_model_info(
+    output_path, fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_size
+):
     """Saves the model information"""
     model_info = {
         "idx": fold_idx,
@@ -249,18 +279,19 @@ def save_model_info(output_path, fold_idx, learning_rate, weight_decay_rate, zoo
 def main():
     """Main function"""
     cwd = Path().absolute()
-    zoom = 400
     scenarios = (
-        "original",
-        "patches_fixed",
+        # "original",
+        # "patches_fixed",
         "patches_fixed_with_random",
         "patches_fixed_with_random_with_transformations",
         "patches_fixed_with_random_with_filtered_cells",
         "patches_fixed_with_random_with_filtered_background",
     )
+    zoom = 200
     learning_rate = 3e-5
     weight_decay_rate = 5e-3
-    
+    # fold_indices = [4]
+    fold_indices = range(5) # default
 
     epochs = 50
     # batch_size = 64
@@ -272,42 +303,36 @@ def main():
         cur_dt_f = datetime.now().strftime("%Y_%m_%d_%H_%M")
         input_path = cwd / "data" / f"{zoom}x" / scenario
         output_path = (
-            cwd / "results" / f"{zoom}x_{experiment_id}_lr_{lr_f}_wdr_{wdr_f}_{cur_dt_f}"
+            cwd
+            / "results"
+            / f"{zoom}x_{experiment_id}_lr_{lr_f}_wdr_{wdr_f}_{cur_dt_f}"
         )
 
         os.makedirs(output_path, exist_ok=True)
         print(f"Directory {output_path} created.")
-
-        only_one_fold = False
-        if only_one_fold:
-            fold_idx = 0
-            print(f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:")
+        for fold_idx in fold_indices:
+            print(
+                f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:"
+            )
             print(f"Scenario: {scenario}")
             print(f"Learning rate: {learning_rate}")
             print(f"Weight decay rate: {weight_decay_rate}")
-            run_fold(fold_idx, learning_rate, weight_decay_rate, zoom, epochs, batch_size, input_path, output_path)
-        else:
-            for fold_idx in range(5):
-                print(f"Starting experiment {experiment_id} with fold {fold_idx}. Hyperparams:")
-                print(f"Scenario: {scenario}")
-                print(f"Learning rate: {learning_rate}")
-                print(f"Weight decay rate: {weight_decay_rate}")
-                p = multiprocessing.Process(
-                    target=run_fold,
-                    args=(
-                        fold_idx,
-                        learning_rate,
-                        weight_decay_rate,
-                        zoom,
-                        epochs,
-                        batch_size,
-                        input_path,
-                        output_path,
-                    ),
-                )
-                p.start()
-                p.join()  # This will block until p finishes execution
-                time.sleep(5)
+            p = multiprocessing.Process(
+                target=run_fold,
+                args=(
+                    fold_idx,
+                    learning_rate,
+                    weight_decay_rate,
+                    zoom,
+                    epochs,
+                    batch_size,
+                    input_path,
+                    output_path,
+                ),
+            )
+            p.start()
+            p.join()  # This will block until p finishes execution
+            time.sleep(5)
 
 
 if __name__ == "__main__":
